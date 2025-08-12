@@ -4,6 +4,7 @@ services:
   aliyun-traffic-check:
     build: .
     container_name: aliyun-traffic-check
+    image: aliyun-traffic-check:20250812
     environment:
       - Credentials__AccessKeyId=your_access_key_id
       - Credentials__AccessKeySecret=your_access_key_secret
