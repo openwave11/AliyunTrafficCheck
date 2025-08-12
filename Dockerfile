@@ -20,4 +20,5 @@ RUN dotnet publish "./AliyunTrafficCheck.csproj" -c $BUILD_CONFIGURATION -o /app
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+ENV DOTNET_ENVIRONMENT=Development
 ENTRYPOINT ["dotnet", "AliyunTrafficCheck.dll"]

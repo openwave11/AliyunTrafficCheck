@@ -5,6 +5,8 @@ using AlibabaCloud.SDK.Ecs20140526.Models;
 using Microsoft.Extensions.Configuration;
 using Quartz;
 using Quartz.Impl;
+using System.Net.Http;
+using System.Text;
 public class Program
 {
     private static string? _accessKeyId = "";
@@ -13,6 +15,7 @@ public class Program
     private static int _maxTraffic = 180;
     private static string? _regionId = "cn-hongkong";
     private static bool _isClose;
+    private static string? _webhookUrl = "";
 
     public static async Task Main(string[] args)
     {
@@ -21,6 +24,7 @@ public class Program
         var builder = new ConfigurationBuilder()
             .SetBasePath(AppContext.BaseDirectory)
             .AddJsonFile("appsettings.json", false, true)
+            .AddJsonFile("appsettings.Development.json", true, true)
             .AddEnvironmentVariables();
         IConfiguration configuration = builder.Build();
         _accessKeyId = configuration["Credentials:AccessKeyId"];
@@ -28,6 +32,11 @@ public class Program
         _instanceId = configuration["instanceId"];
         _regionId = configuration["regionId"];
         int.TryParse(configuration["maxTraffic"], out _maxTraffic);
+        _webhookUrl = configuration["WeChatWebhookUrl"];
+        
+       Console.WriteLine($"当前运行环境: {Environment.OSVersion.Platform} - {Environment.OSVersion.VersionString}");
+       var env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
+       Console.WriteLine($"当前运行时环境: {(string.IsNullOrEmpty(env) ? "默认环境" : env)}");
 
         #endregion
 
@@ -51,7 +60,7 @@ public class Program
             .WithIdentity("checkTrigger", "group1")
             .StartNow()
             .WithSimpleSchedule(x => x
-                .WithIntervalInMinutes(1)
+                .WithIntervalInHours(1)
                 .RepeatForever())
             .Build();
         // 调度任务
@@ -93,17 +102,27 @@ public class Program
     {
         if (!_isClose)
         {
+            string message = "";
+            
             double traffic = await GetTraffic();
-            var convertTraffic = traffic / 1024 / 1024 / 1024;
+            var convertTraffic = Math.Round(traffic / 1024 / 1024 / 1024, 2);
             WriteLog($"当前已使用流量:{convertTraffic}GB");
             if (convertTraffic > _maxTraffic)
             {
                 WriteLog($"当前已超过{_maxTraffic}GB,执行关机任何操作");
                 await ControlInstance("stop");
+                message = $"ECS实例已关闭。已使用流量: {convertTraffic}GB，超过限制 {_maxTraffic}GB。";
             }
             else
             {
                 WriteLog($"当前未超过{_maxTraffic}GB,不执行任何操作");
+                message=$"ECS实例正常运行。已使用流量: {convertTraffic}GB，未超过限制 {_maxTraffic}GB。";
+            }
+            
+            if (!string.IsNullOrEmpty(_webhookUrl))
+            {
+             
+                await SendWeChatNotification(message);
             }
            
         }
@@ -180,6 +199,31 @@ public class Program
             Console.WriteLine($"Unexpected Error: {e.Message}");
         }
     }
+    
+    private static async Task SendWeChatNotification(string message)
+    {
+        try
+        {
+            using var httpClient = new HttpClient();
+            var payload = new
+            {
+                msgtype = "text",
+                text = new
+                {
+                    content = message
+                }
+            };
+            
+            var json = System.Text.Json.JsonSerializer.Serialize(payload);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            await httpClient.PostAsync(_webhookUrl, content);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"发送微信通知失败: {ex.Message}");
+        }
+    }
+    
     public class StartInstanceJob : IJob
     {
         public async Task Execute(IJobExecutionContext context)
@@ -187,6 +231,10 @@ public class Program
             WriteLog($"执行开机操作");
             await ControlInstance("start");
             _isClose = false;
+            if (!string.IsNullOrEmpty(_webhookUrl))
+            {
+                await SendWeChatNotification("ECS实例已开启。");
+            }
         }
     }
     public class CheckJob : IJob

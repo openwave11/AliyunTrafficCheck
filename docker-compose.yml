@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  aliyun-traffic-check:
+    build: .
+    container_name: aliyun-traffic-check
+    environment:
+      - Credentials__AccessKeyId=your_access_key_id
+      - Credentials__AccessKeySecret=your_access_key_secret
+      - InstanceId=
+      - RegionId=cn-hongkong
+      - MaxTraffic=180
+      - WeChatWebhookUrl=your_wechat_webhook_url
+    restart: unless-stopped
